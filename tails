@@ -1,0 +1,459 @@
+# Mascota Virtual de Informática - IPET 249 "Nicolás Copérnico"
+# Laboratorio de Aplicaciones II - 6° G - 2026
+#
+# Byte es un zorro de dos colas que representa a la especialidad de Informática.
+# Hay que cuidarlo: darle café, dejarlo programar y limpiarle los bugs.
+
+import os
+import sys
+import math
+import random
+
+import pygame
+
+pygame.init()
+
+# ---------------------------------------------------------------- configuración
+ANCHO = 800
+ALTO = 600
+FPS = 60
+
+# Cuánto baja cada barra por segundo (se pueden tocar para hacerlo más fácil/difícil)
+DESGASTE_ENERGIA = 2.5
+DESGASTE_ANIMO = 2.0
+DESGASTE_SALUD = 1.5
+
+# Colores del colegio
+BORDO = (112, 24, 44)
+BORDO_OSCURO = (92, 16, 36)
+AMARILLO = (250, 214, 60)
+ROJO = (204, 36, 44)
+BLANCO = (255, 255, 255)
+
+# Colores de la mascota
+NARANJA = (240, 160, 50)
+CREMA = (255, 240, 215)
+NEGRO = (25, 20, 25)
+AZUL = (70, 150, 220)
+VERDE_CODIGO = (90, 230, 120)
+
+try:
+    CARPETA = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    CARPETA = "."
+
+pantalla = pygame.display.set_mode((ANCHO, ALTO))
+pygame.display.set_caption("Byte - Mascota Virtual de Informática - IPET 249")
+reloj = pygame.time.Clock()
+
+fuente_titulo = pygame.font.SysFont("arial", 22, bold=True)
+fuente = pygame.font.SysFont("arial", 18, bold=True)
+fuente_chica = pygame.font.SysFont("arial", 14)
+
+
+
+def dibujar_escudo_a_mano():
+    # Versión para editores online donde no se puede subir la carpeta assets/:
+    # dibujo el escudo del IPET 249 con código.
+    surf = pygame.Surface((87, 104), pygame.SRCALPHA)
+    forma = [(4, 4), (83, 4), (83, 62), (43, 100), (4, 62)]
+    pygame.draw.polygon(surf, AMARILLO, forma)
+    pygame.draw.polygon(surf, NEGRO, forma, 2)
+    # engranajes
+    for (gx, gy, r) in ((34, 30, 13), (52, 24, 9)):
+        for i in range(8):
+            ang = i * math.pi / 4
+            px = gx + math.cos(ang) * (r + 2)
+            py = gy + math.sin(ang) * (r + 2)
+            pygame.draw.circle(surf, (230, 90, 110), (int(px), int(py)), 3)
+        pygame.draw.circle(surf, (230, 90, 110), (gx, gy), r)
+        pygame.draw.circle(surf, AMARILLO, (gx, gy), r // 3)
+    f = pygame.font.SysFont("timesnewroman", 15, bold=True)
+    for letra, pos in (("I", (10, 46)), ("P", (26, 40)), ("E", (44, 34)), ("T", (62, 22))):
+        surf.blit(f.render(letra, True, NEGRO), pos)
+    surf.blit(pygame.font.SysFont("timesnewroman", 20, bold=True).render("249", True, NEGRO), (28, 58))
+    surf.blit(pygame.font.SysFont("timesnewroman", 9, bold=True).render("Nicolás Copérnico", True, NEGRO), (10, 82))
+    return surf
+
+
+ruta_escudo = os.path.join(CARPETA, "assets", "escudo.png")
+if os.path.exists(ruta_escudo):
+    escudo = pygame.image.load(ruta_escudo).convert_alpha()
+    escudo = pygame.transform.smoothscale(escudo, (87, 104))
+else:
+    escudo = dibujar_escudo_a_mano()
+
+# ---------------------------------------------------------------- estado de la mascota
+mascota = {
+    "energia": 100.0,
+    "animo": 100.0,
+    "salud": 100.0,
+    "programando": 0.0,   # segundos que le quedan programando
+    "mensaje": "",
+    "t_mensaje": 0.0,
+}
+
+# posiciones fijas donde aparecen los bugs cuando baja la salud
+POS_BUGS = [(230, 400), (570, 395), (250, 250), (540, 250), (400, 432)]
+
+
+def limitar(valor):
+    # que las barras siempre queden entre 0 y 100
+    return max(0, min(100, valor))
+
+
+def avisar(texto):
+    mascota["mensaje"] = texto
+    mascota["t_mensaje"] = 2.0
+
+
+# ---------------------------------------------------------------- acciones del jugador
+def tomar_cafe():
+    mascota["energia"] = limitar(mascota["energia"] + 25)
+    avisar("¡Glup glup! Café cargado")
+
+
+def programar():
+    if mascota["energia"] < 15:
+        avisar("¡Sin batería! Dale un café primero")
+        return
+    mascota["energia"] = limitar(mascota["energia"] - 15)
+    mascota["animo"] = limitar(mascota["animo"] + 20)
+    mascota["salud"] = limitar(mascota["salud"] - 5)   # programar deja bugs
+    mascota["programando"] = 2.5
+    avisar("Compilando... (ojo con los bugs)")
+
+
+def limpiar_bugs():
+    mascota["salud"] = limitar(mascota["salud"] + 25)
+    avisar("Bugs eliminados")
+
+
+def reiniciar():
+    mascota["energia"] = 100.0
+    mascota["animo"] = 100.0
+    mascota["salud"] = 100.0
+    mascota["programando"] = 0.0
+    avisar("Byte reiniciado")
+
+
+botones = [
+    (pygame.Rect(30, 505, 230, 55), "[C] Tomar café", tomar_cafe),
+    (pygame.Rect(285, 505, 230, 55), "[J] Programar", programar),
+    (pygame.Rect(540, 505, 230, 55), "[L] Limpiar bugs", limpiar_bugs),
+]
+
+
+# ---------------------------------------------------------------- lógica
+def obtener_estado():
+    if mascota["programando"] > 0:
+        return "programando"
+    if mascota["energia"] < 25:
+        return "cansado"
+    if mascota["animo"] < 30 or mascota["salud"] < 30:
+        return "triste"
+    return "feliz"
+
+
+def actualizar(dt):
+    # dt = segundos que pasaron desde el frame anterior, así el desgaste
+    # es igual sin importar los FPS de la compu
+    mascota["energia"] = limitar(mascota["energia"] - DESGASTE_ENERGIA * dt)
+    mascota["animo"] = limitar(mascota["animo"] - DESGASTE_ANIMO * dt)
+    mascota["salud"] = limitar(mascota["salud"] - DESGASTE_SALUD * dt)
+
+    # si está sin energía también se deprime más rápido
+    if mascota["energia"] < 25:
+        mascota["animo"] = limitar(mascota["animo"] - 1.0 * dt)
+
+    if mascota["programando"] > 0:
+        mascota["programando"] -= dt
+    if mascota["t_mensaje"] > 0:
+        mascota["t_mensaje"] -= dt
+
+
+# ---------------------------------------------------------------- dibujo
+def dibujar_fondo():
+    pantalla.fill(BORDO)
+    # cuadrícula finita, como una placa de circuito
+    for y in range(0, 460, 40):
+        pygame.draw.line(pantalla, BORDO_OSCURO, (0, y), (ANCHO, y))
+    for x in range(0, ANCHO, 40):
+        pygame.draw.line(pantalla, BORDO_OSCURO, (x, 0), (x, 460))
+    # piso amarillo con línea blanca
+    pygame.draw.rect(pantalla, AMARILLO, (0, 460, ANCHO, 140))
+    pygame.draw.rect(pantalla, BLANCO, (0, 460, ANCHO, 6))
+
+
+def dibujar_encabezado():
+    pantalla.blit(escudo, (15, 15))
+    t1 = fuente_titulo.render('IPET 249 "Nicolás Copérnico"', True, AMARILLO)
+    t2 = fuente.render("Informática - Lab. de Aplicaciones II", True, BLANCO)
+    t3 = fuente_chica.render("Byte, la mascota virtual", True, BLANCO)
+    pantalla.blit(t1, (115, 25))
+    pantalla.blit(t2, (115, 55))
+    pantalla.blit(t3, (115, 80))
+
+
+def dibujar_barra(x, y, nombre, valor):
+    texto = fuente_chica.render(nombre, True, BLANCO)
+    pantalla.blit(texto, (x, y))
+    pygame.draw.rect(pantalla, BORDO_OSCURO, (x, y + 20, 240, 18), border_radius=4)
+    ancho = int(236 * valor / 100)
+    color = AMARILLO
+    if valor < 25:
+        color = (235, 50, 50)
+    if ancho > 0:
+        pygame.draw.rect(pantalla, color, (x + 2, y + 22, ancho, 14), border_radius=3)
+    pygame.draw.rect(pantalla, BLANCO, (x, y + 20, 240, 18), 2, border_radius=4)
+    num = fuente_chica.render(str(int(valor)) + "%", True, BLANCO)
+    pantalla.blit(num, (x + 205, y))
+
+
+def dibujar_barras():
+    dibujar_barra(520, 20, "Energía (batería)", mascota["energia"])
+    dibujar_barra(520, 68, "Ánimo (nivel de código)", mascota["animo"])
+    dibujar_barra(520, 116, "Salud (limpio de bugs)", mascota["salud"])
+
+
+def dibujar_botones():
+    pos_mouse = pygame.mouse.get_pos()
+    for rect, texto, accion in botones:
+        color = BORDO
+        if rect.collidepoint(pos_mouse):
+            color = ROJO
+        pygame.draw.rect(pantalla, color, rect, border_radius=10)
+        pygame.draw.rect(pantalla, BLANCO, rect, 3, border_radius=10)
+        t = fuente.render(texto, True, BLANCO)
+        pantalla.blit(t, t.get_rect(center=rect.center))
+
+
+def dibujar_cola(x, y, angulo):
+    # dibujo la cola horizontal en una superficie aparte y después la roto
+    surf = pygame.Surface((160, 160), pygame.SRCALPHA)
+    pygame.draw.ellipse(surf, NARANJA, (20, 60, 120, 40))
+    pygame.draw.ellipse(surf, BLANCO, (20, 64, 40, 32))   # punta blanca
+    rotada = pygame.transform.rotate(surf, angulo)
+    rad = math.radians(angulo)
+    # la base de la cola está a 60px del centro, hay que acomodar el centro
+    centro_x = x - 60 * math.cos(rad)
+    centro_y = y + 60 * math.sin(rad)
+    pantalla.blit(rotada, rotada.get_rect(center=(centro_x, centro_y)))
+
+
+def dibujar_bug(x, y, t):
+    x = x + math.sin(t * 3 + y) * 6   # se mueve un poquito
+    for i in (-1, 0, 1):
+        pygame.draw.line(pantalla, NEGRO, (x - 10, y + i * 5), (x - 18, y + i * 8), 2)
+        pygame.draw.line(pantalla, NEGRO, (x + 10, y + i * 5), (x + 18, y + i * 8), 2)
+    pygame.draw.ellipse(pantalla, NEGRO, (x - 11, y - 8, 22, 16))
+    pygame.draw.circle(pantalla, ROJO, (int(x - 3), int(y - 2)), 3)
+    pygame.draw.circle(pantalla, ROJO, (int(x + 4), int(y + 2)), 3)
+
+
+def dibujar_pantalla_codigo(t):
+    # pantalla con código que aparece cuando Byte está programando
+    pygame.draw.rect(pantalla, NEGRO, (570, 200, 190, 135), border_radius=6)
+    pygame.draw.rect(pantalla, AMARILLO, (570, 200, 190, 135), 3, border_radius=6)
+    texto = fuente_chica.render("print('IPET 249')", True, VERDE_CODIGO)
+    pantalla.blit(texto, (582, 208))
+    azar = random.Random(int(t * 6))   # cambia varias veces por segundo
+    for i in range(6):
+        largo = azar.randint(40, 150)
+        pygame.draw.rect(pantalla, VERDE_CODIGO, (582, 236 + i * 16, largo, 6))
+
+
+def dibujar_mascota(estado, t):
+    cx = 400
+    cy = 290
+    if estado in ("feliz", "programando"):
+        cy += math.sin(t * 4) * 4   # saltito
+    else:
+        cy += math.sin(t * 1.5) * 2
+
+    # colas (se caen cuando está triste o cansado)
+    if estado in ("triste", "cansado"):
+        angulo1, angulo2 = 35, 15
+    else:
+        meneo = math.sin(t * 5) * 15
+        angulo1, angulo2 = -25 + meneo, -55 - meneo
+    dibujar_cola(cx - 30, cy + 85, angulo1)
+    dibujar_cola(cx - 30, cy + 85, angulo2)
+
+    # zapatillas rojas
+    for dx in (-52, 2):
+        pygame.draw.ellipse(pantalla, ROJO, (cx + dx, cy + 132, 50, 26))
+        pygame.draw.line(pantalla, BLANCO, (cx + dx + 8, cy + 143), (cx + dx + 40, cy + 143), 4)
+
+    # buzo rojo con detalles amarillos y logo
+    pygame.draw.ellipse(pantalla, ROJO, (cx - 60, cy + 10, 120, 135))
+    pygame.draw.ellipse(pantalla, AMARILLO, (cx - 60, cy + 10, 120, 135), 4)
+    pygame.draw.circle(pantalla, AMARILLO, (cx + 25, cy + 70), 14)
+    logo = fuente_chica.render("249", True, BORDO)
+    pantalla.blit(logo, logo.get_rect(center=(cx + 25, cy + 70)))
+
+    # brazos
+    if estado == "programando":
+        # teclado y manos sobre las teclas
+        pygame.draw.rect(pantalla, NEGRO, (cx - 75, cy + 112, 150, 18), border_radius=4)
+        for i in range(10):
+            pygame.draw.rect(pantalla, BLANCO, (cx - 68 + i * 14, cy + 116, 9, 8))
+        golpe = math.sin(t * 20) * 4
+        manos_izq = (cx - 35, cy + 108 + golpe)
+        manos_der = (cx + 35, cy + 108 - golpe)
+        pygame.draw.line(pantalla, ROJO, (cx - 50, cy + 50), manos_izq, 20)
+        pygame.draw.line(pantalla, ROJO, (cx + 50, cy + 50), manos_der, 20)
+        pygame.draw.circle(pantalla, NARANJA, (int(manos_izq[0]), int(manos_izq[1])), 11)
+        pygame.draw.circle(pantalla, NARANJA, (int(manos_der[0]), int(manos_der[1])), 11)
+    else:
+        # brazo izquierdo abajo
+        pygame.draw.line(pantalla, ROJO, (cx - 50, cy + 50), (cx - 78, cy + 105), 20)
+        pygame.draw.circle(pantalla, NARANJA, (cx - 78, cy + 108), 11)
+        # brazo derecho: saluda si está feliz
+        if estado == "feliz":
+            mano = (cx + 100, cy - 5 + math.sin(t * 8) * 10)
+        else:
+            mano = (cx + 78, cy + 108)
+        pygame.draw.line(pantalla, ROJO, (cx + 50, cy + 50), mano, 20)
+        pygame.draw.circle(pantalla, NARANJA, (int(mano[0]), int(mano[1])), 11)
+
+    # orejas
+    for lado in (-1, 1):
+        pygame.draw.polygon(pantalla, NARANJA, [(cx + lado * 75, cy - 70), (cx + lado * 62, cy - 160), (cx + lado * 15, cy - 100)])
+        pygame.draw.polygon(pantalla, CREMA, [(cx + lado * 65, cy - 85), (cx + lado * 60, cy - 138), (cx + lado * 35, cy - 102)])
+
+    # cabeza, cachetes y hocico
+    pygame.draw.ellipse(pantalla, NARANJA, (cx - 85, cy - 105, 170, 130))
+    pygame.draw.ellipse(pantalla, CREMA, (cx - 82, cy - 50, 76, 62))
+    pygame.draw.ellipse(pantalla, CREMA, (cx + 6, cy - 50, 76, 62))
+    pygame.draw.ellipse(pantalla, CREMA, (cx - 55, cy - 42, 110, 62))
+
+    # ojos
+    for lado in (-1, 1):
+        ex = cx + lado * 38
+        ey = cy - 62
+        if estado == "cansado":
+            # ojos cerrados
+            pygame.draw.line(pantalla, NEGRO, (ex - 14, ey + 2), (ex + 14, ey + 2), 4)
+        else:
+            pygame.draw.ellipse(pantalla, BLANCO, (ex - 17, ey - 20, 34, 40))
+            mirar_x, mirar_y = 0, 0
+            if estado == "programando":
+                mirar_x, mirar_y = 8, 3      # mira la pantalla
+            elif estado == "triste":
+                mirar_y = 7
+            px = ex + mirar_x
+            py = ey + mirar_y
+            pygame.draw.circle(pantalla, AZUL, (px, py), 10)
+            pygame.draw.circle(pantalla, NEGRO, (px, py), 5)
+            pygame.draw.circle(pantalla, BLANCO, (px - 3, py - 3), 3)
+        if estado == "triste":
+            # cejas caídas
+            pygame.draw.line(pantalla, NEGRO, (ex - lado * 18, ey - 30), (ex + lado * 14, ey - 40), 4)
+
+    # lágrima
+    if estado == "triste":
+        pygame.draw.ellipse(pantalla, AZUL, (cx - 46, cy - 38, 9, 14))
+
+    # anteojos
+    lente = pygame.Surface((60, 60), pygame.SRCALPHA)
+    pygame.draw.circle(lente, (120, 190, 255, 60), (30, 30), 27)
+    for lado in (-1, 1):
+        ex = cx + lado * 38
+        ey = cy - 62
+        pantalla.blit(lente, (ex - 30, ey - 30))
+        pygame.draw.circle(pantalla, NEGRO, (ex, ey), 27, 4)
+        pygame.draw.line(pantalla, NEGRO, (ex + lado * 26, ey - 2), (ex + lado * 44, ey - 6), 4)
+    pygame.draw.line(pantalla, NEGRO, (cx - 12, ey), (cx + 12, ey), 4)
+
+    # nariz
+    pygame.draw.ellipse(pantalla, NEGRO, (cx - 8, cy - 30, 16, 11))
+
+    # boca
+    if estado == "feliz":
+        pygame.draw.ellipse(pantalla, ROJO, (cx - 11, cy - 15, 22, 15))
+        pygame.draw.arc(pantalla, NEGRO, (cx - 22, cy - 28, 44, 30), math.pi * 1.1, math.pi * 1.9, 3)
+    elif estado == "programando":
+        pygame.draw.arc(pantalla, NEGRO, (cx - 18, cy - 28, 36, 26), math.pi * 1.1, math.pi * 1.9, 3)
+    elif estado == "triste":
+        pygame.draw.arc(pantalla, NEGRO, (cx - 16, cy - 14, 32, 22), math.pi * 0.15, math.pi * 0.85, 3)
+    else:  # cansado: bostezo
+        pygame.draw.ellipse(pantalla, ROJO, (cx - 10, cy - 17, 20, 18))
+        pygame.draw.ellipse(pantalla, NEGRO, (cx - 10, cy - 17, 20, 18), 2)
+
+    # auriculares
+    pygame.draw.arc(pantalla, NEGRO, (cx - 95, cy - 135, 190, 170), 0, math.pi, 9)
+    for dx in (-110, 82):
+        pygame.draw.rect(pantalla, ROJO, (cx + dx, cy - 78, 28, 56), border_radius=10)
+        pygame.draw.rect(pantalla, AMARILLO, (cx + dx, cy - 78, 28, 56), 3, border_radius=10)
+
+    # Zzz cuando está cansado
+    if estado == "cansado":
+        for i in range(3):
+            z = fuente_titulo.render("z", True, BLANCO)
+            pantalla.blit(z, (cx - 125 - i * 16, cy - 120 - i * 22 + math.sin(t * 2 + i) * 4))
+
+    if estado == "programando":
+        dibujar_pantalla_codigo(t)
+
+
+def dibujar_todo(tiempo):
+    estado = obtener_estado()
+    dibujar_fondo()
+
+    # bugs: cuanto menos salud, más bugs
+    cantidad_bugs = int((100 - mascota["salud"]) // 20)
+    for i in range(min(cantidad_bugs, len(POS_BUGS))):
+        dibujar_bug(POS_BUGS[i][0], POS_BUGS[i][1], tiempo)
+
+    dibujar_mascota(estado, tiempo)
+    dibujar_encabezado()
+    dibujar_barras()
+    dibujar_botones()
+
+    if mascota["t_mensaje"] > 0:
+        msg = fuente.render(mascota["mensaje"], True, BORDO)
+        pantalla.blit(msg, msg.get_rect(center=(ANCHO // 2, 481)))
+
+    pie = fuente_chica.render(
+        "Estado: " + estado + "   |   R reiniciar   |   ESC salir", True, BORDO)
+    pantalla.blit(pie, pie.get_rect(center=(ANCHO // 2, 580)))
+
+
+# ---------------------------------------------------------------- game loop
+def main():
+    tiempo = 0.0
+    corriendo = True
+    while corriendo:
+        dt = reloj.tick(FPS) / 1000
+        tiempo += dt
+
+        for evento in pygame.event.get():
+            if evento.type == pygame.QUIT:
+                corriendo = False
+            elif evento.type == pygame.KEYDOWN:
+                if evento.key == pygame.K_ESCAPE:
+                    corriendo = False
+                elif evento.key == pygame.K_c:
+                    tomar_cafe()
+                elif evento.key == pygame.K_j:
+                    programar()
+                elif evento.key == pygame.K_l:
+                    limpiar_bugs()
+                elif evento.key == pygame.K_r:
+                    reiniciar()
+            elif evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
+                for rect, texto, accion in botones:
+                    if rect.collidepoint(evento.pos):
+                        accion()
+
+        actualizar(dt)
+        dibujar_todo(tiempo)
+        pygame.display.flip()
+
+    pygame.quit()
+    sys.exit()
+
+
+if __name__ == "__main__":
+    main()
